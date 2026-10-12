@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crane</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #14181f; --muted: #5b6575; --line: #e3e6eb;
+    --accent: #1f6feb; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --run: #8250df;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0d1117; --panel: #161b22; --ink: #e6edf3; --muted: #8d96a0; --line: #30363d;
+            --accent: #4493f8; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --run: #a371f7; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 20px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); }
+  .pill { margin-left: auto; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+          border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: var(--panel); }
+  .pill b { color: var(--accent); font-weight: 600; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .tile .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .tile .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .grid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 14px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  h2 { font-size: 14px; margin: 0 0 10px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+           padding: 7px 12px; border-radius: 8px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:hover { filter: brightness(1.05); }
+  .worker { display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 4px 10px; align-items: center; margin-bottom: 10px; }
+  .worker .name { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .worker .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .bar { grid-column: 1 / -1; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); transition: width .4s ease; }
+  .empty { color: var(--muted); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.mono { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .st { font-weight: 600; }
+  .st.done { color: var(--ok); } .st.running { color: var(--run); } .st.queued { color: var(--warn); } .st.failed { color: var(--bad); }
+  .note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  #msg { color: var(--muted); font-size: 12px; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Crane</h1>
+    <span class="sub">a job queue that scales itself on Kubernetes</span>
+    <span class="pill">this page answered by <b id="servedBy">…</b></span>
+  </header>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Queued</div><div class="v" id="queued">–</div></div>
+    <div class="tile"><div class="k">Running</div><div class="v" id="running">–</div></div>
+    <div class="tile"><div class="k">Done</div><div class="v" id="done">–</div></div>
+    <div class="tile"><div class="k">Retried</div><div class="v" id="retried">–</div></div>
+    <div class="tile"><div class="k">Failed</div><div class="v" id="failed">–</div></div>
+    <div class="tile"><div class="k">Workers</div><div class="v" id="workers">–</div></div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" data-kind="primes" data-n="2000000" data-count="1">Add 1 job</button>
+    <button data-kind="primes" data-n="2000000" data-count="50">Add 50 jobs</button>
+    <button data-kind="primes" data-n="3000000" data-count="200">Add 200 heavy jobs</button>
+    <button data-kind="sleep" data-n="15" data-count="1">Add a 15s job (then kill its worker)</button>
+  </div>
+  <div id="msg"></div>
+
+  <div class="grid">
+    <section>
+      <h2>Jobs finished per worker pod</h2>
+      <div id="workerList"><p class="empty">No workers yet.</p></div>
+      <p class="note">Each bar is one worker pod. When the autoscaler adds pods, new bars appear.</p>
+    </section>
+    <section>
+      <h2>Latest jobs</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Job</th><th>Kind</th><th>Status</th><th>Worker pod</th><th>Tries</th><th>Time</th></tr></thead>
+          <tbody id="jobs"><tr><td colspan="6" class="empty">No jobs yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function refresh() {
+  try {
+    const [s, j] = await Promise.all([
+      fetch("/api/stats").then((r) => r.json()),
+      fetch("/api/jobs?limit=14").then((r) => r.json()),
+    ]);
+    $("servedBy").textContent = s.served_by;
+    for (const k of ["queued", "running", "done", "retried", "failed"]) $(k).textContent = s[k].toLocaleString();
+    $("workers").textContent = s.active_workers.length;
+
+    const counts = s.done_by_worker;
+    const active = new Set(s.active_workers.map((w) => w.pod));
+    const pods = Object.keys(counts).filter((p) => active.has(p) || counts[p] > 0)
+      .sort((a, b) => counts[b] - counts[a]).slice(0, 12);
+    for (const w of s.active_workers) if (!pods.includes(w.pod)) pods.push(w.pod);
+    const max = Math.max(1, ...pods.map((p) => counts[p] || 0));
+    $("workerList").innerHTML = pods.length ? pods.map((p) => `
+      <div class="worker">
+        <span class="name" title="${esc(p)}">${esc(p)}${active.has(p) ? "" : " (gone)"}</span>
+        <span class="n">${(counts[p] || 0).toLocaleString()}</span>
+        <div class="bar"><i style="width:${((counts[p] || 0) / max) * 100}%"></i></div>
+      </div>`).join("") : '<p class="empty">No workers yet.</p>';
+
+    $("jobs").innerHTML = j.jobs.length ? j.jobs.map((x) => `
+      <tr>
+        <td class="mono">${esc(x.id)}</td>
+        <td>${esc(x.kind)} ${x.kind === "sleep" ? x.n + "s" : (x.n / 1e6).toFixed(1) + "M"}</td>
+        <td class="st ${esc(x.status)}">${esc(x.status)}</td>
+        <td class="mono">${esc(x.worker || "–")}</td>
+        <td>${x.attempts}</td>
+        <td>${x.duration_ms != null ? (x.duration_ms / 1000).toFixed(2) + "s" : "–"}</td>
+      </tr>`).join("") : '<tr><td colspan="6" class="empty">No jobs yet.</td></tr>';
+  } catch (e) {
+    $("msg").textContent = "Can't reach the API right now, retrying…";
+  }
+}
+
+document.querySelectorAll("button[data-kind]").forEach((b) => b.addEventListener("click", async () => {
+  const body = { kind: b.dataset.kind, n: Number(b.dataset.n), count: Number(b.dataset.count) };
+  const r = await fetch("/api/jobs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const data = await r.json();
+  $("msg").textContent = r.ok ? `Added ${data.ids.length} job(s) through API pod ${data.served_by}.` : (data.detail || "Something went wrong.");
+  refresh();
+}));
+
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

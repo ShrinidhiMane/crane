@@ -1,0 +1,108 @@
+# Workers pull jobs from Redis. The HorizontalPodAutoscaler adds workers when
+# they're busy (CPU) and removes them when the queue is quiet.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crane-worker
+  namespace: crane
+  labels:
+    app.kubernetes.io/name: crane
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: crane
+spec:
+  # No `replicas` here on purpose: the HPA below owns the count. If this file
+  # set it, every `kubectl apply` would reset the autoscaler's choice.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crane
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crane
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: crane
+    spec:
+      automountServiceAccountToken: false
+      # On scale-down, Kubernetes sends SIGTERM and waits this long. The worker
+      # finishes its current job (15s at most) and exits cleanly before then.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: crane:1.0
+          imagePullPolicy: IfNotPresent
+          args: ["worker"]
+          envFrom:
+            - configMapRef: {name: crane-config}
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: crane-redis, key: password}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+            - name: CRANE_HEARTBEAT_FILE
+              value: /tmp/heartbeat
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}   # the HPA measures CPU against this
+            limits: {cpu: 500m, memory: 192Mi}
+          # A worker has no port, so liveness checks a heartbeat file it touches
+          # every loop. If the file goes stale (stuck worker), Kubernetes restarts it.
+          livenessProbe:
+            exec:
+              command: ["python", "-m", "crane", "probe"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: crane-worker
+  namespace: crane
+  labels:
+    app.kubernetes.io/part-of: crane
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: crane-worker
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70  # aim for workers using 70% of their CPU request
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - {type: Pods, value: 2, periodSeconds: 15}  # add up to 2 workers every 15s
+    scaleDown:
+      stabilizationWindowSeconds: 60  # wait a minute of quiet before removing workers
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 30}

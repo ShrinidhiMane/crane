@@ -1,0 +1,21 @@
+# Run Crane without Kubernetes:  docker compose up --build --scale worker=3
+# Dashboard: http://localhost:8080
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "dev-only-password", "--appendonly", "yes"]
+
+  api:
+    build: .
+    command: ["api"]
+    environment: &env
+      REDIS_HOST: redis
+      REDIS_PASSWORD: dev-only-password
+    ports: ["8080:8080"]
+    depends_on: [redis]
+
+  worker:
+    build: .
+    command: ["worker"]
+    environment: *env
+    depends_on: [redis]

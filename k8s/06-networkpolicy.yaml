@@ -1,0 +1,27 @@
+# Only Crane's own API, workers and janitor may talk to Redis. Any other pod
+# (like the BusyBox check pod) is blocked.
+#
+# minikube's default network ignores NetworkPolicy. To enforce it, start
+# minikube with a CNI that supports it:  minikube start --cni=calico
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow-crane-only
+  namespace: crane
+  labels:
+    app.kubernetes.io/part-of: crane
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: ["api", "worker", "janitor"]
+      ports:
+        - protocol: TCP
+          port: 6379

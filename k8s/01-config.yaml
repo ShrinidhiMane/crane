@@ -1,0 +1,17 @@
+# Plain settings shared by the API, workers and janitor. Change a value, re-apply,
+# then `kubectl -n crane rollout restart deployment` to pick it up.
+# The Redis password is NOT here: it's in the crane-redis Secret (see secret.example.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crane-config
+  namespace: crane
+  labels:
+    app.kubernetes.io/part-of: crane
+data:
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  CRANE_LEASE_SECONDS: "20"   # a job not finished in 20s is assumed lost and retried
+  CRANE_MAX_ATTEMPTS: "3"
+  CRANE_KEEP_FINISHED: "500"
+  CRANE_MAX_N: "3000000"

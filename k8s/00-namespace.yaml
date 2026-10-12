@@ -1,0 +1,12 @@
+# Everything Crane creates lives in this namespace, so `kubectl delete namespace
+# crane` removes all of it at once.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crane
+  labels:
+    app.kubernetes.io/part-of: crane
+    # Pod Security Admission at the strictest level: any pod here that runs
+    # as root, keeps Linux capabilities, or can escalate privileges is rejected.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

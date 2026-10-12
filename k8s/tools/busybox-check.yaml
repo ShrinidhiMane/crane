@@ -1,0 +1,51 @@
+# A throwaway BusyBox pod that tests Crane from inside the cluster.
+# scripts/check.sh runs it for you. By hand:
+#   kubectl apply -f k8s/tools/busybox-check.yaml
+#   kubectl -n crane logs -f busybox-check
+#   kubectl -n crane delete pod busybox-check
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox-check
+  namespace: crane
+  labels:
+    app.kubernetes.io/name: busybox-check
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: check
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - |
+          echo "== 1. Is the API ready? (through the crane-api Service) =="
+          wget -qO- -T 5 http://crane-api/readyz || echo "FAILED"
+          echo
+          echo "== 2. Which API pods answer? (5 requests, spread by the Service) =="
+          for i in 1 2 3 4 5; do
+            wget -qO- -T 5 http://crane-api/api/stats | sed -n 's/.*"served_by":"\([^"]*\)".*/  \1/p'
+          done
+          echo "== 3. Queue stats =="
+          wget -qO- -T 5 http://crane-api/api/stats | sed 's/"active_workers".*"served_by"/"served_by"/'
+          echo
+          echo "== 4. Can a random pod reach Redis directly? =="
+          if nc -z -w 3 redis 6379; then
+            echo "REACHABLE: NetworkPolicy is not enforced (start minikube with --cni=calico)"
+          else
+            echo "BLOCKED: only Crane's own pods can talk to Redis"
+          fi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {cpu: 50m, memory: 32Mi}
